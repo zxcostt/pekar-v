@@ -13,6 +13,7 @@ import (
 
 	"pekar-v/internal/core"
 	"pekar-v/internal/database"
+	"pekar-v/internal/production"
 )
 
 func main() {
@@ -41,11 +42,17 @@ func main() {
 		w.Write([]byte(`{"status": "ok", "db": "connected"}`))
 	})
 
-	// Инициализация пакета CoreAndUsers
+	// 1. Пакет CoreAndUsers
 	coreRepo := core.NewRepository(dbPool)
 	coreService := core.NewService(coreRepo)
 	coreHandler := core.NewHandler(coreService)
 	coreHandler.RegisterRoutes(r)
+
+	// 2. Пакет ProductionAndWarehouse
+	prodRepo := production.NewRepository(dbPool)
+	prodService := production.NewService(prodRepo)
+	prodHandler := production.NewHandler(prodService)
+	prodHandler.RegisterRoutes(r)
 
 	fmt.Println("HTTP-сервер запущен на http://localhost:8080")
 	if err := http.ListenAndServe(":8080", r); err != nil {
