@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pekar_v_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pekar_user
+      POSTGRES_PASSWORD: pekar_password
+      POSTGRES_DB: pekar_v_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+      - ./internal/database/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql
