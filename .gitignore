@@ -1,0 +1,28 @@
+# Бинарные сборки Go
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+app
+
+# Файлы окружения и секреты
+.env
+*.env.local
+
+# Логи и временные файлы
+*.log
+tmp/
+
+# Зависимости и сборка фронтенда (когда добавим папку frontend)
+frontend/node_modules/
+frontend/dist/
+
+# Контейнеры и данные локальной БД
+pgdata/
+
+# IDE и редакторы
+.vscode/
+.idea/
+*.swp
