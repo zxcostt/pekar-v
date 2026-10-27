@@ -14,6 +14,7 @@ import (
 	"pekar-v/internal/core"
 	"pekar-v/internal/database"
 	"pekar-v/internal/production"
+	"pekar-v/internal/sales"
 )
 
 func main() {
@@ -53,6 +54,13 @@ func main() {
 	prodService := production.NewService(prodRepo)
 	prodHandler := production.NewHandler(prodService)
 	prodHandler.RegisterRoutes(r)
+
+	// 3. Пакет SalesAndPOS
+	salesRepo := sales.NewRepository(dbPool)
+	fiscalMock := sales.NewFiscalMockService()
+	salesService := sales.NewService(salesRepo, fiscalMock)
+	salesHandler := sales.NewHandler(salesService)
+	salesHandler.RegisterRoutes(r)
 
 	fmt.Println("HTTP-сервер запущен на http://localhost:8080")
 	if err := http.ListenAndServe(":8080", r); err != nil {
