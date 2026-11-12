@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -90,9 +91,14 @@ func (r *Repository) WriteOffIngredientStock(ctx context.Context, ingredientID i
 
 // Список готовой продукции на витрине
 func (r *Repository) ListProducts(ctx context.Context) ([]Product, error) {
+	// Синхронизируем: если есть рецептуры без созданных продуктов, создаем их
+	r.ensureProductsForRecipes(ctx)
+
 	rows, err := r.db.Query(ctx, `
-		SELECT product_id, recipe_id, name, barcode, retail_price, current_quantity
-		FROM products ORDER BY product_id
+		SELECT p.product_id, p.recipe_id, r.recipe_title, p.name, p.barcode, p.retail_price, p.current_quantity
+		FROM products p
+		LEFT JOIN recipes r ON r.recipe_id = p.recipe_id
+		ORDER BY p.product_id
 	`)
 	if err != nil {
 		return nil, err
@@ -102,12 +108,30 @@ func (r *Repository) ListProducts(ctx context.Context) ([]Product, error) {
 	var list []Product
 	for rows.Next() {
 		var p Product
-		if err := rows.Scan(&p.ProductID, &p.RecipeID, &p.Name, &p.Barcode, &p.RetailPrice, &p.CurrentQuantity); err != nil {
+		if err := rows.Scan(&p.ProductID, &p.RecipeID, &p.RecipeTitle, &p.Name, &p.Barcode, &p.RetailPrice, &p.CurrentQuantity); err != nil {
 			return nil, err
 		}
 		list = append(list, p)
 	}
 	return list, nil
+}
+
+func (r *Repository) ensureProductsForRecipes(ctx context.Context) {
+	_, _ = r.db.Exec(ctx, `
+		INSERT INTO products (recipe_id, name, barcode, retail_price, current_quantity)
+		SELECT 
+			r.recipe_id,
+			CASE 
+				WHEN POSITION(':' IN r.recipe_title) > 0 THEN TRIM(SUBSTRING(r.recipe_title FROM POSITION(':' IN r.recipe_title) + 1))
+				ELSE r.recipe_title 
+			END,
+			'460' || LPAD(r.recipe_id::text, 10, '0'),
+			80.00,
+			0
+		FROM recipes r
+		LEFT JOIN products p ON p.recipe_id = r.recipe_id
+		WHERE p.product_id IS NULL
+	`)
 }
 
 // Список всех рецептур с составом ингредиентов и расчётом себестоимости
@@ -190,10 +214,45 @@ func (r *Repository) CreateRecipe(ctx context.Context, req CreateRecipeRequest) 
 		recipe.Items = append(recipe.Items, ri)
 	}
 
+	// Автоматически создаем готовое изделие на витрине, привязанное к данной техкарте
+	prodName := strings.TrimSpace(req.ProductName)
+	if prodName == "" {
+		prodName = cleanRecipeTitle(req.RecipeTitle)
+	}
+
+	retailPrice := 80.0
+	if req.RetailPrice != nil && *req.RetailPrice > 0 {
+		retailPrice = *req.RetailPrice
+	}
+
+	barcode := strings.TrimSpace(req.Barcode)
+	if barcode == "" {
+		barcode = fmt.Sprintf("460%010d", recipe.RecipeID)
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO products (recipe_id, name, barcode, retail_price, current_quantity)
+		VALUES ($1, $2, $3, $4, 0)
+	`, recipe.RecipeID, prodName, barcode, retailPrice)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return &recipe, nil
+}
+
+func cleanRecipeTitle(title string) string {
+	cleaned := strings.TrimSpace(title)
+	if idx := strings.Index(cleaned, ":"); idx != -1 {
+		cleaned = strings.TrimSpace(cleaned[idx+1:])
+	}
+	if cleaned == "" {
+		cleaned = strings.TrimSpace(title)
+	}
+	return cleaned
 }
 
 // UC 6 + UC 7: Зафиксировать выпуск продукции со списанием сырья по рецептуре в одной транзакции
