@@ -177,7 +177,9 @@ function handleCheckoutSuccess(res) {
         <EmployeesTab
           v-if="activeTab === 'employees'"
           :users="users"
+          :current-user="currentUser"
           @user-created="loadAllData"
+          @user-dismissed="loadAllData"
           @notify="notify"
         />
       </main>

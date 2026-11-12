@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -102,4 +103,28 @@ func (s *Service) CreateUser(ctx context.Context, req CreateUserRequest) (*User,
 	}
 
 	return s.repo.CreateUser(ctx, newUser)
+}
+
+func (s *Service) DismissUser(ctx context.Context, targetUserID, managerID int) (string, error) {
+	if managerID > 0 && targetUserID == managerID {
+		return "", errors.New("Нельзя уволить самого себя")
+	}
+
+	user, err := s.repo.GetByID(ctx, targetUserID)
+	if err != nil {
+		return "", err
+	}
+
+	// 1. Пытаемся полностью удалить, если у сотрудника нет связанных записей в БД
+	err = s.repo.HardDeleteUser(ctx, targetUserID)
+	if err == nil {
+		return fmt.Sprintf("Аккаунт сотрудника «%s» успешно удалён из системы", user.FullName), nil
+	}
+
+	// 2. Если есть связанные документы (чеки, наряды), деактивируем аккаунт
+	if err := s.repo.DeactivateUser(ctx, targetUserID); err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("Сотрудник «%s» уволен (аккаунт заблокирован, история операций сохранена)", user.FullName), nil
 }

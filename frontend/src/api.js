@@ -19,6 +19,8 @@ export const api = {
   getUsers: () => request('/users'),
   createUser: (payload) =>
     request('/users', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteUser: (id, managerId) =>
+    request(`/users/${id}${managerId ? `?managerId=${managerId}` : ''}`, { method: 'DELETE' }),
 
   // UC 2, 4, 5, 6, 7: Склад сырья, рецептуры и производство
   getIngredients: () => request('/ingredients'),

@@ -100,3 +100,46 @@ func (r *Repository) CreateUser(ctx context.Context, u *User) (*User, error) {
 	}
 	return &created, nil
 }
+
+func (r *Repository) GetByID(ctx context.Context, id int) (*User, error) {
+	query := `
+		SELECT id, full_name, login, password_hash, role, is_active,
+		       register_number, workshop_station, warehouse_zone_id
+		FROM users
+		WHERE id = $1
+	`
+	var u User
+	err := r.db.QueryRow(ctx, query, id).Scan(
+		&u.ID, &u.FullName, &u.Login, &u.PasswordHash, &u.Role, &u.IsActive,
+		&u.RegisterNumber, &u.WorkshopStation, &u.WarehouseZoneID,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (r *Repository) HardDeleteUser(ctx context.Context, id int) error {
+	tag, err := r.db.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+func (r *Repository) DeactivateUser(ctx context.Context, id int) error {
+	tag, err := r.db.Exec(ctx, `UPDATE users SET is_active = FALSE WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}

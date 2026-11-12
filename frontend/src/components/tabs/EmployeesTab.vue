@@ -1,16 +1,20 @@
 <script setup>
 import { ref } from 'vue'
 import { api } from '../../api'
-import { UserPlus, Users, ShieldCheck, CheckCircle2 } from 'lucide-vue-next'
+import { UserPlus, Users, ShieldCheck, CheckCircle2, UserMinus, UserX } from 'lucide-vue-next'
 
 const props = defineProps({
   users: {
     type: Array,
     default: () => []
+  },
+  currentUser: {
+    type: Object,
+    required: true
   }
 })
 
-const emit = defineEmits(['user-created', 'notify'])
+const emit = defineEmits(['user-created', 'user-dismissed', 'notify'])
 
 const form = ref({
   fullName: '',
@@ -95,6 +99,25 @@ async function handleCreateUser() {
     emit('notify', err.message, 'error')
   } finally {
     isSubmitting.value = false
+  }
+}
+
+async function handleDismissUser(user) {
+  if (user.id === props.currentUser.id) {
+    return emit('notify', 'Нельзя уволить самого себя', 'error')
+  }
+
+  const actionName = user.isActive ? 'уволить' : 'удалить'
+  if (!confirm(`Вы действительно хотите ${actionName} сотрудника «${user.fullName}» (${user.login})?`)) {
+    return
+  }
+
+  try {
+    const res = await api.deleteUser(user.id, props.currentUser.id)
+    emit('notify', res.message)
+    emit('user-dismissed')
+  } catch (err) {
+    emit('notify', err.message, 'error')
   }
 }
 </script>
@@ -225,6 +248,7 @@ async function handleCreateUser() {
               <th class="p-3">Должность</th>
               <th class="p-3">Назначение</th>
               <th class="p-3">Статус</th>
+              <th class="p-3">Действия</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-stone-200">
@@ -253,10 +277,38 @@ async function handleCreateUser() {
               </td>
               <td class="p-3">
                 <span
+                  v-if="u.isActive"
                   class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700"
                 >
                   <CheckCircle2 class="w-3 h-3"/> Активен
                 </span>
+                <span
+                  v-else
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700"
+                >
+                  <UserX class="w-3 h-3"/> Уволен
+                </span>
+              </td>
+              <td class="p-3">
+                <span v-if="u.id === currentUser.id" class="text-xs text-stone-400 italic">
+                  (Текущий профиль)
+                </span>
+                <button
+                  v-else-if="u.isActive"
+                  @click="handleDismissUser(u)"
+                  class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-red-50 hover:bg-red-100 text-red-700 transition cursor-pointer"
+                  title="Уволить сотрудника"
+                >
+                  <UserMinus class="w-3.5 h-3.5"/> Уволить
+                </button>
+                <button
+                  v-else
+                  @click="handleDismissUser(u)"
+                  class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-stone-100 hover:bg-stone-200 text-stone-600 transition cursor-pointer"
+                  title="Удалить запись из базы"
+                >
+                  Удалить
+                </button>
               </td>
             </tr>
           </tbody>
