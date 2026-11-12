@@ -5,15 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
-	ErrIngredientNotFound = errors.New("сырьё не найдено")
-	ErrProductNotFound    = errors.New("готовое изделие не найдено")
-	ErrInsufficientStock  = errors.New("недостаточно остатка сырья на складе")
+	ErrIngredientNotFound       = errors.New("сырьё не найдено")
+	ErrProductNotFound          = errors.New("готовое изделие не найдено")
+	ErrInsufficientStock        = errors.New("недостаточно остатка сырья на складе")
+	ErrInsufficientProductStock = errors.New("недостаточно готовой продукции на витрине для списания")
 )
 
 type Repository struct {
@@ -21,7 +23,22 @@ type Repository struct {
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{db: db}
+	repo := &Repository{db: db}
+	repo.ensureTables(context.Background())
+	return repo
+}
+
+func (r *Repository) ensureTables(ctx context.Context) {
+	_, _ = r.db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS product_write_offs (
+			write_off_id SERIAL PRIMARY KEY,
+			product_id INT NOT NULL REFERENCES products(product_id) ON DELETE CASCADE,
+			user_id INT NOT NULL REFERENCES users(id),
+			quantity INT NOT NULL CHECK (quantity > 0),
+			reason VARCHAR(255) NOT NULL,
+			write_off_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+	`)
 }
 
 // Список всего сырья на складе
@@ -393,4 +410,134 @@ func (r *Repository) ListProductionOrders(ctx context.Context) ([]ProductionOrde
 		orders = append(orders, o)
 	}
 	return orders, nil
+}
+
+// ExecuteProductWriteOff — атомарное списание готовой продукции с витрины
+func (r *Repository) ExecuteProductWriteOff(ctx context.Context, req ProductWriteOffRequest) (*ProductWriteOff, error) {
+	r.ensureTables(ctx)
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var (
+		productName string
+		currentQty  int
+		retailPrice float64
+	)
+
+	err = tx.QueryRow(ctx, `
+		SELECT name, current_quantity, retail_price
+		FROM products
+		WHERE product_id = $1
+		FOR UPDATE
+	`, req.ProductID).Scan(&productName, &currentQty, &retailPrice)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrProductNotFound
+		}
+		return nil, err
+	}
+
+	if currentQty < req.Quantity {
+		return nil, fmt.Errorf("%w: на витрине «%s» в наличии %d шт., попытка списать %d шт.",
+			ErrInsufficientProductStock, productName, currentQty, req.Quantity)
+	}
+
+	// 1. Уменьшаем остаток готовой продукции на витрине
+	_, err = tx.Exec(ctx, `
+		UPDATE products
+		SET current_quantity = current_quantity - $1
+		WHERE product_id = $2
+	`, req.Quantity, req.ProductID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Добавляем запись в журнал актов списания
+	var (
+		writeOffID   int
+		writeOffDate time.Time
+	)
+	err = tx.QueryRow(ctx, `
+		INSERT INTO product_write_offs (product_id, user_id, quantity, reason, write_off_date)
+		VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+		RETURNING write_off_id, write_off_date
+	`, req.ProductID, req.UserID, req.Quantity, req.Reason).Scan(&writeOffID, &writeOffDate)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. Имя ответственного сотрудника
+	var userName string
+	if req.UserID > 0 {
+		_ = tx.QueryRow(ctx, `SELECT full_name FROM users WHERE id = $1`, req.UserID).Scan(&userName)
+	}
+	if userName == "" {
+		userName = "Сотрудник"
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	return &ProductWriteOff{
+		WriteOffID:   writeOffID,
+		ProductID:    req.ProductID,
+		ProductName:  productName,
+		RetailPrice:  retailPrice,
+		UserID:       req.UserID,
+		UserName:     userName,
+		Quantity:     req.Quantity,
+		Reason:       req.Reason,
+		WriteOffDate: writeOffDate,
+	}, nil
+}
+
+// ListProductWriteOffs — получение журнала списаний готовой продукции
+func (r *Repository) ListProductWriteOffs(ctx context.Context) ([]ProductWriteOff, error) {
+	r.ensureTables(ctx)
+
+	rows, err := r.db.Query(ctx, `
+		SELECT 
+			w.write_off_id,
+			w.product_id,
+			p.name,
+			p.retail_price,
+			w.user_id,
+			COALESCE(u.full_name, 'Неизвестный сотрудник'),
+			w.quantity,
+			w.reason,
+			w.write_off_date
+		FROM product_write_offs w
+		JOIN products p ON p.product_id = w.product_id
+		LEFT JOIN users u ON u.id = w.user_id
+		ORDER BY w.write_off_date DESC, w.write_off_id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []ProductWriteOff
+	for rows.Next() {
+		var w ProductWriteOff
+		if err := rows.Scan(
+			&w.WriteOffID,
+			&w.ProductID,
+			&w.ProductName,
+			&w.RetailPrice,
+			&w.UserID,
+			&w.UserName,
+			&w.Quantity,
+			&w.Reason,
+			&w.WriteOffDate,
+		); err != nil {
+			return nil, err
+		}
+		list = append(list, w)
+	}
+	return list, nil
 }

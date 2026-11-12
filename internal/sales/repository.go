@@ -321,5 +321,21 @@ func (r *Repository) GetShiftReport(ctx context.Context) (*ShiftReportDTO, error
 		return nil, err
 	}
 
+	// Сводная статистика по списаниям готовой продукции
+	var (
+		writtenOffCount int
+		writtenOffTotal float64
+	)
+	_ = r.db.QueryRow(ctx, `
+		SELECT 
+			COALESCE(SUM(w.quantity), 0),
+			COALESCE(SUM(w.quantity * p.retail_price), 0)
+		FROM product_write_offs w
+		JOIN products p ON p.product_id = w.product_id
+	`).Scan(&writtenOffCount, &writtenOffTotal)
+
+	report.WrittenOffCount = writtenOffCount
+	report.WrittenOffTotal = writtenOffTotal
+
 	return report, nil
 }

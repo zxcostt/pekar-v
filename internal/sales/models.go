@@ -138,13 +138,15 @@ type PaymentRecord struct {
 
 // ShiftReportDTO — модель представления сменного отчета (UC 3)
 type ShiftReportDTO struct {
-	ShiftID       int       `json:"shiftId"`
-	OpenedAt      time.Time `json:"openedAt"`
-	TotalRevenue  float64   `json:"totalRevenue"`
-	CashSubtotal  float64   `json:"cashSubtotal"`
-	CardSubtotal  float64   `json:"cardSubtotal"`
-	ReceiptCount  int       `json:"receiptCount"`
-	RefundedCount int       `json:"refundedCount"`
+	ShiftID         int       `json:"shiftId"`
+	OpenedAt        time.Time `json:"openedAt"`
+	TotalRevenue    float64   `json:"totalRevenue"`
+	CashSubtotal    float64   `json:"cashSubtotal"`
+	CardSubtotal    float64   `json:"cardSubtotal"`
+	ReceiptCount    int       `json:"receiptCount"`
+	RefundedCount   int       `json:"refundedCount"`
+	WrittenOffCount int       `json:"writtenOffCount"`
+	WrittenOffTotal float64   `json:"writtenOffTotal"`
 }
 
 func (s *ShiftReportDTO) ExportReportToPdf(outputPath string) bool {
