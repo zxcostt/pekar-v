@@ -52,13 +52,13 @@ async function handleProduce() {
       </p>
       <form @submit.prevent="handleProduce" class="space-y-4">
         <div>
-          <label class="block text-sm font-medium mb-1">Готовое изделие</label>
+          <label class="block text-sm font-medium mb-1">Готовое изделие (Техкарта)</label>
           <select
             v-model="produceForm.productId"
             class="w-full px-3 py-2.5 rounded-xl border border-stone-300 bg-white"
           >
             <option v-for="p in products" :key="p.productId" :value="p.productId">
-              {{ p.name }} (на витрине: {{ p.currentQuantity }} шт.)
+              {{ p.name }} <template v-if="p.recipeTitle && p.recipeTitle !== p.name">({{ p.recipeTitle }})</template> — на витрине: {{ p.currentQuantity }} шт.
             </option>
           </select>
         </div>

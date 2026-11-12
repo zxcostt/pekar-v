@@ -33,6 +33,7 @@ func (i *Ingredient) DeductStock(amount float64) bool {
 type Product struct {
 	ProductID       int     `json:"productId"`
 	RecipeID        *int    `json:"recipeId,omitempty"`
+	RecipeTitle     *string `json:"recipeTitle,omitempty"`
 	Name            string  `json:"name"`
 	Barcode         string  `json:"barcode"`
 	RetailPrice     float64 `json:"retailPrice"`
@@ -101,8 +102,11 @@ type StockAdjustmentRequest struct {
 }
 
 type CreateRecipeRequest struct {
-	RecipeTitle   string `json:"recipeTitle"`
-	YieldQuantity int    `json:"yieldQuantity"`
+	RecipeTitle   string   `json:"recipeTitle"`
+	YieldQuantity int      `json:"yieldQuantity"`
+	ProductName   string   `json:"productName,omitempty"`
+	RetailPrice   *float64 `json:"retailPrice,omitempty"`
+	Barcode       string   `json:"barcode,omitempty"`
 	Items         []struct {
 		IngredientID     int     `json:"ingredientId"`
 		RequiredQuantity float64 `json:"requiredQuantity"`

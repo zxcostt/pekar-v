@@ -21,6 +21,8 @@ const emit = defineEmits(['create-recipe-success', 'notify'])
 
 const newRecipe = ref({
   recipeTitle: '',
+  productName: '',
+  retailPrice: 85,
   yieldQuantity: 10,
   items: [{ ingredientId: 1, requiredQuantity: 0.5 }]
 })
@@ -34,15 +36,19 @@ async function handleCreateRecipe() {
   try {
     await api.createRecipe({
       recipeTitle: newRecipe.value.recipeTitle,
+      productName: newRecipe.value.productName ? newRecipe.value.productName.trim() : undefined,
+      retailPrice: Number(newRecipe.value.retailPrice) || 80,
       yieldQuantity: Number(newRecipe.value.yieldQuantity),
       items: newRecipe.value.items.map(i => ({
         ingredientId: Number(i.ingredientId),
         requiredQuantity: Number(i.requiredQuantity)
       }))
     })
-    emit('notify', 'Рецептура (техкарта) успешно сохранена в справочнике')
+    emit('notify', 'Техкарта сохранена, изделие добавлено в ассортимент цеха и на витрину!')
     newRecipe.value = {
       recipeTitle: '',
+      productName: '',
+      retailPrice: 85,
       yieldQuantity: 10,
       items: [{ ingredientId: props.ingredients[0]?.ingredientId || 1, requiredQuantity: 0.5 }]
     }
@@ -65,18 +71,39 @@ async function handleCreateRecipe() {
             v-model="newRecipe.recipeTitle"
             type="text"
             required
-            placeholder="Например: ТК №2 Багет французский"
+            placeholder="Например: ТК №2: Багет французский"
             class="w-full px-3 py-2 rounded-xl border border-stone-300"
           />
         </div>
         <div>
-          <label class="block text-xs font-medium text-stone-600 mb-1">Выход партии (шт.)</label>
+          <label class="block text-xs font-medium text-stone-600 mb-1">Наименование изделия для витрины</label>
           <input
-            v-model.number="newRecipe.yieldQuantity"
-            type="number"
-            min="1"
+            v-model="newRecipe.productName"
+            type="text"
+            placeholder="Например: Багет французский (по умолчанию из ТК)"
             class="w-full px-3 py-2 rounded-xl border border-stone-300"
           />
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs font-medium text-stone-600 mb-1">Выход партии (шт.)</label>
+            <input
+              v-model.number="newRecipe.yieldQuantity"
+              type="number"
+              min="1"
+              class="w-full px-3 py-2 rounded-xl border border-stone-300"
+            />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-stone-600 mb-1">Розничная цена (₽ / шт.)</label>
+            <input
+              v-model.number="newRecipe.retailPrice"
+              type="number"
+              min="1"
+              step="1"
+              class="w-full px-3 py-2 rounded-xl border border-stone-300"
+            />
+          </div>
         </div>
 
         <div class="space-y-2 pt-2">
