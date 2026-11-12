@@ -7,6 +7,7 @@ import {
   Package,
   FileText,
   BarChart3,
+  Users,
   LogOut
 } from 'lucide-vue-next'
 
@@ -112,6 +113,17 @@ function canAccess(tab) {
         ]"
       >
         <BarChart3 class="w-4 h-4"/> Сменный отчёт
+      </button>
+
+      <button
+        v-if="canAccess('employees')"
+        @click="emit('update:activeTab', 'employees')"
+        :class="[
+          'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition cursor-pointer',
+          activeTab === 'employees' ? 'bg-amber-600 text-white' : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
+        ]"
+      >
+        <Users class="w-4 h-4"/> Персонал
       </button>
     </nav>
 

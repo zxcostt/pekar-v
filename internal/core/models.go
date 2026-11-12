@@ -81,3 +81,14 @@ type LoginResponse struct {
 	Permissions string `json:"permissions"`
 	Message     string `json:"message"`
 }
+
+// CreateUserRequest — DTO для создания нового сотрудника управляющим
+type CreateUserRequest struct {
+	FullName        string  `json:"fullName"`
+	Login           string  `json:"login"`
+	Password        string  `json:"password"`
+	Role            string  `json:"role"`
+	RegisterNumber  *int    `json:"registerNumber,omitempty"`
+	WorkshopStation *string `json:"workshopStation,omitempty"`
+	WarehouseZoneID *int    `json:"warehouseZoneId,omitempty"`
+}

@@ -12,6 +12,7 @@ import ProductionTab from './components/tabs/ProductionTab.vue'
 import WarehouseTab from './components/tabs/WarehouseTab.vue'
 import RecipesTab from './components/tabs/RecipesTab.vue'
 import ReportsTab from './components/tabs/ReportsTab.vue'
+import EmployeesTab from './components/tabs/EmployeesTab.vue'
 
 // --- Состояние авторизации (UC 1) ---
 const currentUser = ref(null)
@@ -37,19 +38,21 @@ const ingredients = ref([])
 const recipes = ref([])
 const productionOrders = ref([])
 const receipts = ref([])
+const users = ref([])
 const shiftReport = ref(null)
 const lastPrintedReceipt = ref(null)
 
 // Загрузка всех справочников и документов
 async function loadAllData() {
   try {
-    const [prodData, ingData, recData, ordData, rcptData, repData] = await Promise.all([
+    const [prodData, ingData, recData, ordData, rcptData, repData, usersData] = await Promise.all([
       api.getProducts(),
       api.getIngredients(),
       api.getRecipes(),
       api.getProductionOrders(),
       api.getReceipts(),
-      api.getShiftReport()
+      api.getShiftReport(),
+      api.getUsers()
     ])
     products.value = prodData || []
     ingredients.value = ingData || []
@@ -57,6 +60,7 @@ async function loadAllData() {
     productionOrders.value = ordData || []
     receipts.value = rcptData || []
     shiftReport.value = repData
+    users.value = usersData || []
   } catch (err) {
     notify(err.message, 'error')
   }
@@ -167,6 +171,14 @@ function handleCheckoutSuccess(res) {
         <ReportsTab
           v-if="activeTab === 'reports'"
           :shift-report="shiftReport"
+        />
+
+        <!-- МОДУЛЬ 7: УПРАВЛЕНИЕ ПЕРСОНАЛОМ (ТОЛЬКО ДЛЯ УПРАВЛЯЮЩЕГО) -->
+        <EmployeesTab
+          v-if="activeTab === 'employees'"
+          :users="users"
+          @user-created="loadAllData"
+          @notify="notify"
         />
       </main>
     </div>

@@ -19,6 +19,7 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/auth/login", h.Login)
 	r.Get("/api/users", h.ListUsers)
+	r.Post("/api/users", h.CreateUser)
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +55,32 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(users)
+}
+
+func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
+	var req CreateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Некорректный формат JSON", http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.service.CreateUser(r.Context(), req)
+	if err != nil {
+		if errors.Is(err, ErrUserAlreadyExists) {
+			writeJSONError(w, err.Error(), http.StatusConflict)
+			return
+		}
+		if errors.Is(err, ErrInvalidUserData) {
+			writeJSONError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSONError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(user)
 }
 
 func writeJSONError(w http.ResponseWriter, message string, code int) {

@@ -65,3 +65,38 @@ func (r *Repository) ListAll(ctx context.Context) ([]User, error) {
 	}
 	return users, nil
 }
+
+func (r *Repository) CreateUser(ctx context.Context, u *User) (*User, error) {
+	query := `
+		INSERT INTO users (full_name, login, password_hash, role, is_active,
+		                   register_number, workshop_station, warehouse_zone_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id, full_name, login, password_hash, role, is_active,
+		          register_number, workshop_station, warehouse_zone_id
+	`
+	var created User
+	err := r.db.QueryRow(ctx, query,
+		u.FullName,
+		u.Login,
+		u.PasswordHash,
+		u.Role,
+		u.IsActive,
+		u.RegisterNumber,
+		u.WorkshopStation,
+		u.WarehouseZoneID,
+	).Scan(
+		&created.ID,
+		&created.FullName,
+		&created.Login,
+		&created.PasswordHash,
+		&created.Role,
+		&created.IsActive,
+		&created.RegisterNumber,
+		&created.WorkshopStation,
+		&created.WarehouseZoneID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &created, nil
+}
