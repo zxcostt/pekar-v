@@ -87,7 +87,7 @@ CREATE TABLE payments (
     authorization_code VARCHAR(50)
 );
 
--- 4. Начальные тестовые данные (Seed) для демонстрации
+-- 4. Начальные тестовые данные 
 INSERT INTO users (full_name, login, password_hash, role, register_number, workshop_station, warehouse_zone_id) VALUES
 ('Иванова Анна (Кассир)', 'cashier', 'pass123', 'CASHIER', 1, NULL, NULL),
 ('Петров Сергей (Пекарь)', 'baker', 'pass123', 'BAKER', NULL, 'Печной цех №1', NULL),
