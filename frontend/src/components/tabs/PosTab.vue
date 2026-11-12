@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { api } from '../../api'
-import { Minus, Plus, Banknote, CreditCard } from 'lucide-vue-next'
+import { Minus, Plus, Banknote, CreditCard, PackageX, Trash2, X } from 'lucide-vue-next'
 
 const props = defineProps({
   products: {
@@ -18,7 +18,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['checkout-success', 'notify'])
+const emit = defineEmits(['checkout-success', 'writeoff-success', 'notify'])
 
 // Состояние Кассы (UC 8..14)
 const cart = ref([])
@@ -84,13 +84,77 @@ async function handleCheckout() {
     emit('notify', err.message, 'error')
   }
 }
+
+// Модальное окно оперативного списания выпечки кассиром
+const showWriteOffModal = ref(false)
+const posWriteOffForm = ref({
+  productId: null,
+  quantity: 1,
+  reason: 'Истечение срока годности (вечерний остаток)'
+})
+const isWritingOffPos = ref(false)
+
+const predefinedReasons = [
+  'Истечение срока годности (вечерний остаток)',
+  'Брак выпечки (подгорело / пересушено)',
+  'Потеря товарного вида / деформация',
+  'Дегустация / витринный образец'
+]
+
+function openWriteOffModal(product) {
+  posWriteOffForm.value.productId = product?.productId || props.products[0]?.productId || null
+  posWriteOffForm.value.quantity = 1
+  posWriteOffForm.value.reason = 'Истечение срока годности (вечерний остаток)'
+  showWriteOffModal.value = true
+}
+
+const selectedPosWriteOffProduct = computed(() => {
+  return props.products.find(p => p.productId === posWriteOffForm.value.productId)
+})
+
+async function submitPosWriteOff() {
+  const prod = selectedPosWriteOffProduct.value
+  if (!prod) return
+  if (posWriteOffForm.value.quantity <= 0) {
+    return emit('notify', 'Количество должно быть больше 0', 'error')
+  }
+  if (posWriteOffForm.value.quantity > prod.currentQuantity) {
+    return emit('notify', `На витрине всего ${prod.currentQuantity} шт.`, 'error')
+  }
+
+  isWritingOffPos.value = true
+  try {
+    const res = await api.writeOffProduct(
+      prod.productId,
+      props.currentUser.id,
+      Number(posWriteOffForm.value.quantity),
+      posWriteOffForm.value.reason.trim()
+    )
+    emit('notify', res.message || 'Акт списания выпечки проведён')
+    emit('writeoff-success')
+    showWriteOffModal.value = false
+  } catch (err) {
+    emit('notify', err.message, 'error')
+  } finally {
+    isWritingOffPos.value = false
+  }
+}
 </script>
 
 <template>
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <!-- Витрина готовой выпечки -->
     <div class="lg:col-span-2 space-y-4">
-      <h2 class="text-lg font-bold">Витрина готовой продукции (выберите товар)</h2>
+      <div class="flex justify-between items-center">
+        <h2 class="text-lg font-bold">Витрина готовой продукции (выберите товар)</h2>
+        <button
+          @click="openWriteOffModal()"
+          class="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold cursor-pointer transition shadow-xs"
+        >
+          <PackageX class="w-4 h-4 text-rose-600" />
+          <span>Списать с витрины</span>
+        </button>
+      </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div
           v-for="p in products"
@@ -279,6 +343,92 @@ async function handleCheckout() {
           Пробить фискальный чек
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно оперативного списания выпечки -->
+  <div
+    v-if="showWriteOffModal"
+    class="fixed inset-0 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50"
+  >
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-stone-200">
+      <div class="flex justify-between items-center mb-4 pb-3 border-b border-stone-100">
+        <div class="flex items-center gap-2 text-rose-700 font-bold text-lg">
+          <PackageX class="w-5 h-5" />
+          <span>Акт списания выпечки</span>
+        </div>
+        <button
+          @click="showWriteOffModal = false"
+          class="text-stone-400 hover:text-stone-600 p-1 rounded-lg cursor-pointer"
+        >
+          <X class="w-5 h-5" />
+        </button>
+      </div>
+
+      <form @submit.prevent="submitPosWriteOff" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-stone-600 uppercase mb-1">Товар на витрине</label>
+          <select
+            v-model="posWriteOffForm.productId"
+            class="w-full px-3 py-2.5 rounded-xl border border-stone-300 text-sm bg-white"
+          >
+            <option v-for="p in products" :key="p.productId" :value="p.productId">
+              {{ p.name }} (в наличии: {{ p.currentQuantity }} шт. • {{ p.retailPrice }} ₽)
+            </option>
+          </select>
+          <div v-if="selectedPosWriteOffProduct" class="mt-1 text-xs text-stone-500">
+            Текущий остаток: <span class="font-bold text-stone-800">{{ selectedPosWriteOffProduct.currentQuantity }} шт.</span>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-stone-600 uppercase mb-1">Количество к списанию (шт.)</label>
+          <input
+            v-model.number="posWriteOffForm.quantity"
+            type="number"
+            min="1"
+            :max="selectedPosWriteOffProduct?.currentQuantity || 1"
+            required
+            class="w-full px-4 py-2.5 rounded-xl border border-stone-300 text-sm"
+          />
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-stone-600 uppercase mb-1">Причина</label>
+          <select
+            v-model="posWriteOffForm.reason"
+            class="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs bg-white mb-2"
+          >
+            <option v-for="r in predefinedReasons" :key="r" :value="r">{{ r }}</option>
+            <option value="">-- Другая причина --</option>
+          </select>
+          <input
+            v-if="!predefinedReasons.includes(posWriteOffForm.reason)"
+            v-model="posWriteOffForm.reason"
+            type="text"
+            placeholder="Опишите причину списания..."
+            class="w-full px-3 py-2 rounded-xl border border-stone-300 text-sm"
+          />
+        </div>
+
+        <div class="flex gap-2 pt-2">
+          <button
+            type="button"
+            @click="showWriteOffModal = false"
+            class="flex-1 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-700 font-semibold rounded-xl cursor-pointer text-sm"
+          >
+            Отмена
+          </button>
+          <button
+            type="submit"
+            :disabled="isWritingOffPos || !selectedPosWriteOffProduct || selectedPosWriteOffProduct.currentQuantity === 0"
+            class="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold rounded-xl cursor-pointer text-sm flex items-center justify-center gap-1.5"
+          >
+            <Trash2 class="w-4 h-4" />
+            <span>{{ isWritingOffPos ? 'Проведение...' : 'Списать' }}</span>
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 </template>

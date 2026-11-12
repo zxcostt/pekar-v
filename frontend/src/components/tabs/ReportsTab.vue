@@ -29,7 +29,7 @@ function exportShiftReportPdf() {
         </button>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <div class="p-4 rounded-xl bg-amber-50 border border-amber-200">
           <div class="text-xs text-amber-800 uppercase font-semibold">Общая выручка</div>
           <div class="text-2xl font-bold text-amber-900 mt-1">{{ shiftReport.totalRevenue.toFixed(2) }} ₽</div>
@@ -49,6 +49,11 @@ function exportShiftReportPdf() {
         <div class="p-4 rounded-xl bg-red-50 border border-red-200">
           <div class="text-xs text-red-800 uppercase font-semibold">Возвратов</div>
           <div class="text-2xl font-bold text-red-900 mt-1">{{ shiftReport.refundedCount }}</div>
+        </div>
+        <div class="p-4 rounded-xl bg-rose-50 border border-rose-200">
+          <div class="text-xs text-rose-800 uppercase font-semibold">Списано выпечки</div>
+          <div class="text-2xl font-bold text-rose-900 mt-1">{{ shiftReport.writtenOffCount || 0 }} шт.</div>
+          <div class="text-xs text-rose-600 font-medium mt-1">Потери: {{ (shiftReport.writtenOffTotal || 0).toFixed(2) }} ₽</div>
         </div>
       </div>
     </div>

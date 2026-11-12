@@ -118,3 +118,24 @@ type ProduceRequest struct {
 	BakerID       int `json:"bakerId"`
 	ProducedUnits int `json:"producedUnits"`
 }
+
+// ProductWriteOff — модель акта списания готовой продукции с витрины
+type ProductWriteOff struct {
+	WriteOffID   int       `json:"writeOffId"`
+	ProductID     int       `json:"productId"`
+	ProductName   string    `json:"productName,omitempty"`
+	RetailPrice   float64   `json:"retailPrice,omitempty"`
+	UserID        int       `json:"userId"`
+	UserName      string    `json:"userName,omitempty"`
+	Quantity      int       `json:"quantity"`
+	Reason        string    `json:"reason"`
+	WriteOffDate  time.Time `json:"writeOffDate"`
+}
+
+// ProductWriteOffRequest — DTO для оформления списания готовой продукции
+type ProductWriteOffRequest struct {
+	ProductID int    `json:"productId"`
+	UserID    int    `json:"userId"`
+	Quantity  int    `json:"quantity"`
+	Reason    string `json:"reason"`
+}

@@ -54,6 +54,15 @@ CREATE TABLE production_orders (
     cancel_reason TEXT
 );
 
+CREATE TABLE product_write_offs (
+    write_off_id SERIAL PRIMARY KEY,
+    product_id INT NOT NULL REFERENCES products(product_id) ON DELETE CASCADE,
+    user_id INT NOT NULL REFERENCES users(id),
+    quantity INT NOT NULL CHECK (quantity > 0),
+    reason VARCHAR(255) NOT NULL,
+    write_off_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 3. Пакет SalesAndPOS: Чеки и Платежи
 CREATE TABLE receipts (
     receipt_id SERIAL PRIMARY KEY,

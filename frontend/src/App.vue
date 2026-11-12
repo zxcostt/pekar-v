@@ -37,6 +37,7 @@ const products = ref([])
 const ingredients = ref([])
 const recipes = ref([])
 const productionOrders = ref([])
+const productWriteOffs = ref([])
 const receipts = ref([])
 const users = ref([])
 const shiftReport = ref(null)
@@ -45,14 +46,15 @@ const lastPrintedReceipt = ref(null)
 // Загрузка всех справочников и документов
 async function loadAllData() {
   try {
-    const [prodData, ingData, recData, ordData, rcptData, repData, usersData] = await Promise.all([
+    const [prodData, ingData, recData, ordData, rcptData, repData, usersData, writeOffsData] = await Promise.all([
       api.getProducts(),
       api.getIngredients(),
       api.getRecipes(),
       api.getProductionOrders(),
       api.getReceipts(),
       api.getShiftReport(),
-      api.getUsers()
+      api.getUsers(),
+      api.getProductWriteOffs()
     ])
     products.value = prodData || []
     ingredients.value = ingData || []
@@ -61,6 +63,7 @@ async function loadAllData() {
     receipts.value = rcptData || []
     shiftReport.value = repData
     users.value = usersData || []
+    productWriteOffs.value = writeOffsData || []
   } catch (err) {
     notify(err.message, 'error')
   }
@@ -127,6 +130,7 @@ function handleCheckoutSuccess(res) {
           :current-user="currentUser"
           :last-printed-receipt="lastPrintedReceipt"
           @checkout-success="handleCheckoutSuccess"
+          @writeoff-success="loadAllData"
           @notify="notify"
         />
 
@@ -138,13 +142,15 @@ function handleCheckoutSuccess(res) {
           @notify="notify"
         />
 
-        <!-- МОДУЛЬ 3: ПРОИЗВОДСТВЕННЫЙ ЦЕХ — ВЫПУСК ВЫПЕЧКИ (UC 6 + UC 7) -->
+        <!-- МОДУЛЬ 3: ПРОИЗВОДСТВЕННЫЙ ЦЕХ — ВЫПУСК ВЫПЕЧКИ (UC 6 + UC 7) И СПИСАНИЕ ВИТРИНЫ -->
         <ProductionTab
           v-if="activeTab === 'production'"
           :products="products"
           :production-orders="productionOrders"
+          :product-write-offs="productWriteOffs"
           :current-user="currentUser"
           @produce-success="loadAllData"
+          @writeoff-success="loadAllData"
           @notify="notify"
         />
 

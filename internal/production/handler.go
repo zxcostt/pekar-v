@@ -30,6 +30,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/products", h.ListProducts)
 	r.Get("/api/production/orders", h.ListOrders)
 	r.Post("/api/production/orders", h.Produce)
+
+	// Списание готовой продукции с витрины
+	r.Get("/api/products/writeoffs", h.ListProductWriteOffs)
+	r.Post("/api/products/writeoff", h.WriteOffProduct)
 }
 
 func (h *Handler) ListIngredients(w http.ResponseWriter, r *http.Request) {
@@ -127,9 +131,37 @@ func (h *Handler) Produce(w http.ResponseWriter, r *http.Request) {
 	}, http.StatusCreated)
 }
 
+func (h *Handler) ListProductWriteOffs(w http.ResponseWriter, r *http.Request) {
+	items, err := h.service.GetProductWriteOffs(r.Context())
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, items, http.StatusOK)
+}
+
+func (h *Handler) WriteOffProduct(w http.ResponseWriter, r *http.Request) {
+	var req ProductWriteOffRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Некорректный JSON", http.StatusBadRequest)
+		return
+	}
+	record, err := h.service.WriteOffProduct(r.Context(), req)
+	if err != nil {
+		handleDomainError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"message":  "Акт списания готовой продукции успешно проведён",
+		"writeOff": record,
+	}, http.StatusCreated)
+}
+
 func handleDomainError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, ErrInvalidQuantity), errors.Is(err, ErrInsufficientStock):
+	case errors.Is(err, ErrInvalidQuantity),
+		errors.Is(err, ErrInsufficientStock),
+		errors.Is(err, ErrInsufficientProductStock):
 		writeJSONError(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, ErrIngredientNotFound), errors.Is(err, ErrProductNotFound):
 		writeJSONError(w, err.Error(), http.StatusNotFound)

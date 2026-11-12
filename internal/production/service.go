@@ -63,3 +63,20 @@ func (s *Service) ProduceProduct(ctx context.Context, req ProduceRequest) (*Prod
 func (s *Service) GetProductionOrders(ctx context.Context) ([]ProductionOrder, error) {
 	return s.repo.ListProductionOrders(ctx)
 }
+
+func (s *Service) WriteOffProduct(ctx context.Context, req ProductWriteOffRequest) (*ProductWriteOff, error) {
+	if req.ProductID <= 0 {
+		return nil, errors.New("не выбрано изделие для списания")
+	}
+	if req.Quantity <= 0 {
+		return nil, ErrInvalidQuantity
+	}
+	if req.Reason == "" {
+		req.Reason = "Истечение срока годности / вечернее списание"
+	}
+	return s.repo.ExecuteProductWriteOff(ctx, req)
+}
+
+func (s *Service) GetProductWriteOffs(ctx context.Context) ([]ProductWriteOff, error) {
+	return s.repo.ListProductWriteOffs(ctx)
+}

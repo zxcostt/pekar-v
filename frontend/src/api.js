@@ -35,6 +35,9 @@ export const api = {
   getProductionOrders: () => request('/production/orders'),
   produceProduct: (productId, bakerId, producedUnits) =>
     request('/production/orders', { method: 'POST', body: JSON.stringify({ productId, bakerId, producedUnits }) }),
+  getProductWriteOffs: () => request('/products/writeoffs'),
+  writeOffProduct: (productId, userId, quantity, reason) =>
+    request('/products/writeoff', { method: 'POST', body: JSON.stringify({ productId, userId, quantity, reason }) }),
 
   // UC 3, 8..14: Касса, продажи, возвраты и сменный отчёт
   getReceipts: () => request('/sales/receipts'),
