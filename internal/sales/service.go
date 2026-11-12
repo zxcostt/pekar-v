@@ -11,6 +11,9 @@ var (
 	ErrInvalidDiscount  = errors.New("скидка должна быть в диапазоне от 0 до 100%")
 	ErrInsufficientCash = errors.New("внесено недостаточно наличных средств")
 	ErrInvalidPayType   = errors.New("неподдерживаемый способ оплаты (допустимо CASH или CARD)")
+	ErrShiftAlreadyOpen = errors.New("кассовая смена уже открыта")
+	ErrNoActiveShift    = errors.New("нет открытой кассовой смены. Откройте смену для проведения операций")
+	ErrInvalidCashValue = errors.New("сумма наличных средств не может быть отрицательной")
 )
 
 type Service struct {
@@ -26,6 +29,14 @@ func NewService(repo *Repository, fiscal *FiscalMockService) *Service {
 }
 
 func (s *Service) ProcessSale(ctx context.Context, req CreateSaleRequest) (*Receipt, error) {
+	activeShift, err := s.repo.GetActiveShift(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if activeShift == nil {
+		return nil, ErrNoActiveShift
+	}
+
 	if len(req.Items) == 0 {
 		return nil, ErrEmptyCart
 	}
@@ -104,4 +115,40 @@ func (s *Service) GetReceipts(ctx context.Context) ([]Receipt, error) {
 
 func (s *Service) GenerateShiftReport(ctx context.Context) (*ShiftReportDTO, error) {
 	return s.repo.GetShiftReport(ctx)
+}
+
+func (s *Service) GetActiveShift(ctx context.Context) (*CashShift, error) {
+	return s.repo.GetActiveShift(ctx)
+}
+
+func (s *Service) OpenShift(ctx context.Context, req OpenShiftRequest) (*CashShift, error) {
+	if req.CashierID <= 0 {
+		return nil, errors.New("не указан ID кассира для открытия смены")
+	}
+	if req.InitialCash < 0 {
+		return nil, ErrInvalidCashValue
+	}
+	return s.repo.OpenShift(ctx, req)
+}
+
+func (s *Service) GetXReport(ctx context.Context) (*XReportDTO, error) {
+	active, err := s.repo.GetActiveShift(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if active == nil {
+		return nil, ErrNoActiveShift
+	}
+	return s.repo.GetXReport(ctx, active.ShiftID, s.fiscal)
+}
+
+func (s *Service) CloseShift(ctx context.Context, req CloseShiftRequest) (*CloseShiftResponse, error) {
+	if req.ActualCash < 0 || req.EncashmentAmount < 0 {
+		return nil, ErrInvalidCashValue
+	}
+	return s.repo.CloseShift(ctx, req, s.fiscal)
+}
+
+func (s *Service) GetShiftsHistory(ctx context.Context) ([]CashShift, error) {
+	return s.repo.ListShifts(ctx)
 }

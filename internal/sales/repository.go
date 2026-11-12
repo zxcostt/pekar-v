@@ -21,7 +21,29 @@ type Repository struct {
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{db: db}
+	repo := &Repository{db: db}
+	repo.ensureTables(context.Background())
+	return repo
+}
+
+func (r *Repository) ensureTables(ctx context.Context) {
+	_, _ = r.db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS cash_shifts (
+			shift_id SERIAL PRIMARY KEY,
+			cashier_id INT NOT NULL REFERENCES users(id),
+			register_number INT NOT NULL DEFAULT 1,
+			opened_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			closed_at TIMESTAMP,
+			initial_cash NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (initial_cash >= 0),
+			final_cash NUMERIC(10, 2),
+			cash_revenue NUMERIC(10, 2) NOT NULL DEFAULT 0,
+			card_revenue NUMERIC(10, 2) NOT NULL DEFAULT 0,
+			encashment_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
+			z_report_doc VARCHAR(100),
+			status VARCHAR(20) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'CLOSED'))
+		);
+		ALTER TABLE receipts ADD COLUMN IF NOT EXISTS shift_id INT REFERENCES cash_shifts(shift_id) ON DELETE SET NULL;
+	`)
 }
 
 // CreateSaleTransaction — атомарная транзакция продажи (UC 8 + UC 9 + UC 10 + UC 11..13)
@@ -97,11 +119,15 @@ func (r *Repository) CreateSaleTransaction(
 	receipt.RegisterFiscalSlip(fiscalDoc)
 
 	// 5. Сохраняем шапку чека в таблицу receipts
+	var activeShiftID *int
+	_ = tx.QueryRow(ctx, `SELECT shift_id FROM cash_shifts WHERE status = 'OPEN' ORDER BY shift_id DESC LIMIT 1`).Scan(&activeShiftID)
+	receipt.ShiftID = activeShiftID
+
 	err = tx.QueryRow(ctx, `
-		INSERT INTO receipts (cashier_id, discount_rate, is_completed, is_refunded, fiscal_doc_number)
-		VALUES ($1, $2, TRUE, FALSE, $3)
+		INSERT INTO receipts (cashier_id, shift_id, discount_rate, is_completed, is_refunded, fiscal_doc_number)
+		VALUES ($1, $2, $3, TRUE, FALSE, $4)
 		RETURNING receipt_id, receipt_date
-	`, receipt.CashierID, receipt.DiscountRate, receipt.FiscalDocNumber).Scan(&receipt.ReceiptID, &receipt.ReceiptDate)
+	`, receipt.CashierID, receipt.ShiftID, receipt.DiscountRate, receipt.FiscalDocNumber).Scan(&receipt.ReceiptID, &receipt.ReceiptDate)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +253,7 @@ func (r *Repository) RefundReceiptByFiscalDoc(ctx context.Context, fiscalDoc str
 // ListReceipts — список всех чеков с позициями и платежами
 func (r *Repository) ListReceipts(ctx context.Context) ([]Receipt, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT r.receipt_id, r.cashier_id, u.full_name, r.receipt_date,
+		SELECT r.receipt_id, r.shift_id, r.cashier_id, u.full_name, r.receipt_date,
 		       r.discount_rate, r.is_completed, r.is_refunded, COALESCE(r.fiscal_doc_number, '')
 		FROM receipts r
 		JOIN users u ON u.id = r.cashier_id
@@ -242,7 +268,7 @@ func (r *Repository) ListReceipts(ctx context.Context) ([]Receipt, error) {
 	for rows.Next() {
 		var rec Receipt
 		if err := rows.Scan(
-			&rec.ReceiptID, &rec.CashierID, &rec.CashierName, &rec.ReceiptDate,
+			&rec.ReceiptID, &rec.ShiftID, &rec.CashierID, &rec.CashierName, &rec.ReceiptDate,
 			&rec.DiscountRate, &rec.IsCompleted, &rec.IsRefunded, &rec.FiscalDocNumber,
 		); err != nil {
 			return nil, err
@@ -294,34 +320,109 @@ func (r *Repository) ListReceipts(ctx context.Context) ([]Receipt, error) {
 	return receipts, nil
 }
 
-// GetShiftReport — UC 3: Формировать сменный отчет
-func (r *Repository) GetShiftReport(ctx context.Context) (*ShiftReportDTO, error) {
-	report := &ShiftReportDTO{
-		ShiftID:  1,
-		OpenedAt: time.Now().Truncate(24 * time.Hour),
+// GetActiveShift — получение текущей открытой кассовой смены
+func (r *Repository) GetActiveShift(ctx context.Context) (*CashShift, error) {
+	r.ensureTables(ctx)
+
+	var s CashShift
+	err := r.db.QueryRow(ctx, `
+		SELECT s.shift_id, s.cashier_id, u.full_name, s.register_number,
+		       s.opened_at, s.closed_at, s.initial_cash, s.final_cash,
+		       s.cash_revenue, s.card_revenue, s.encashment_amount, s.z_report_doc, s.status
+		FROM cash_shifts s
+		JOIN users u ON u.id = s.cashier_id
+		WHERE s.status = 'OPEN'
+		ORDER BY s.shift_id DESC
+		LIMIT 1
+	`).Scan(
+		&s.ShiftID, &s.CashierID, &s.CashierName, &s.RegisterNumber,
+		&s.OpenedAt, &s.ClosedAt, &s.InitialCash, &s.FinalCash,
+		&s.CashRevenue, &s.CardRevenue, &s.EncashmentAmount, &s.ZReportDoc, &s.Status,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &s, nil
+}
+
+// OpenShift — открытие новой кассовой смены с внесением начального размена
+func (r *Repository) OpenShift(ctx context.Context, req OpenShiftRequest) (*CashShift, error) {
+	r.ensureTables(ctx)
+
+	active, err := r.GetActiveShift(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if active != nil {
+		return nil, fmt.Errorf("кассовая смена №%d уже открыта кассиром %s", active.ShiftID, active.CashierName)
 	}
 
-	err := r.db.QueryRow(ctx, `
-		SELECT
-			COALESCE(SUM(CASE WHEN NOT r.is_refunded THEN p.amount ELSE 0 END), 0) AS total_revenue,
-			COALESCE(SUM(CASE WHEN NOT r.is_refunded AND p.payment_type = 'CASH' THEN p.amount ELSE 0 END), 0) AS cash_subtotal,
-			COALESCE(SUM(CASE WHEN NOT r.is_refunded AND p.payment_type = 'CARD' THEN p.amount ELSE 0 END), 0) AS card_subtotal,
-			COUNT(CASE WHEN NOT r.is_refunded THEN 1 END) AS active_receipts,
-			COUNT(CASE WHEN r.is_refunded THEN 1 END) AS refunded_receipts
-		FROM receipts r
-		JOIN payments p ON p.receipt_id = r.receipt_id
-	`).Scan(
-		&report.TotalRevenue,
-		&report.CashSubtotal,
-		&report.CardSubtotal,
-		&report.ReceiptCount,
-		&report.RefundedCount,
+	regNum := req.RegisterNumber
+	if regNum <= 0 {
+		regNum = 1
+	}
+
+	var s CashShift
+	err = r.db.QueryRow(ctx, `
+		INSERT INTO cash_shifts (cashier_id, register_number, initial_cash, status, opened_at)
+		VALUES ($1, $2, $3, 'OPEN', CURRENT_TIMESTAMP)
+		RETURNING shift_id, cashier_id, register_number, opened_at, initial_cash, cash_revenue, card_revenue, encashment_amount, status
+	`, req.CashierID, regNum, req.InitialCash).Scan(
+		&s.ShiftID, &s.CashierID, &s.RegisterNumber, &s.OpenedAt, &s.InitialCash,
+		&s.CashRevenue, &s.CardRevenue, &s.EncashmentAmount, &s.Status,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	// Сводная статистика по списаниям готовой продукции
+	_ = r.db.QueryRow(ctx, `SELECT full_name FROM users WHERE id = $1`, s.CashierID).Scan(&s.CashierName)
+	return &s, nil
+}
+
+// GetXReport — снятие промежуточного фискального отчёта без гашения
+func (r *Repository) GetXReport(ctx context.Context, shiftID int, fiscal *FiscalMockService) (*XReportDTO, error) {
+	r.ensureTables(ctx)
+
+	var (
+		s           CashShift
+		cashierName string
+	)
+	err := r.db.QueryRow(ctx, `
+		SELECT s.shift_id, s.cashier_id, u.full_name, s.register_number, s.opened_at, s.initial_cash
+		FROM cash_shifts s
+		JOIN users u ON u.id = s.cashier_id
+		WHERE s.shift_id = $1
+	`, shiftID).Scan(&s.ShiftID, &s.CashierID, &cashierName, &s.RegisterNumber, &s.OpenedAt, &s.InitialCash)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("смена №%d не найдена", shiftID)
+		}
+		return nil, err
+	}
+
+	var (
+		cashRevenue   float64
+		cardRevenue   float64
+		receiptCount  int
+		refundedCount int
+	)
+	err = r.db.QueryRow(ctx, `
+		SELECT
+			COALESCE(SUM(CASE WHEN NOT r.is_refunded AND p.payment_type = 'CASH' THEN p.amount ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN NOT r.is_refunded AND p.payment_type = 'CARD' THEN p.amount ELSE 0 END), 0),
+			COUNT(CASE WHEN NOT r.is_refunded THEN 1 END),
+			COUNT(CASE WHEN r.is_refunded THEN 1 END)
+		FROM receipts r
+		JOIN payments p ON p.receipt_id = r.receipt_id
+		WHERE r.shift_id = $1
+	`, shiftID).Scan(&cashRevenue, &cardRevenue, &receiptCount, &refundedCount)
+	if err != nil {
+		return nil, err
+	}
+
 	var (
 		writtenOffCount int
 		writtenOffTotal float64
@@ -332,10 +433,256 @@ func (r *Repository) GetShiftReport(ctx context.Context) (*ShiftReportDTO, error
 			COALESCE(SUM(w.quantity * p.retail_price), 0)
 		FROM product_write_offs w
 		JOIN products p ON p.product_id = w.product_id
-	`).Scan(&writtenOffCount, &writtenOffTotal)
+		WHERE w.write_off_date >= $1
+	`, s.OpenedAt).Scan(&writtenOffCount, &writtenOffTotal)
 
-	report.WrittenOffCount = writtenOffCount
-	report.WrittenOffTotal = writtenOffTotal
+	totalRevenue := cashRevenue + cardRevenue
+	expectedInDrawer := s.InitialCash + cashRevenue
+
+	slip, _ := fiscal.PrintXReport(shiftID, totalRevenue)
+
+	return &XReportDTO{
+		ShiftID:              s.ShiftID,
+		RegisterNumber:       s.RegisterNumber,
+		CashierID:            s.CashierID,
+		CashierName:          cashierName,
+		OpenedAt:             s.OpenedAt,
+		ReportTime:           time.Now(),
+		InitialCash:          s.InitialCash,
+		CashRevenue:          cashRevenue,
+		CardRevenue:          cardRevenue,
+		TotalRevenue:         totalRevenue,
+		ReceiptCount:         receiptCount,
+		RefundedCount:        refundedCount,
+		ExpectedCashInDrawer: expectedInDrawer,
+		WrittenOffCount:      writtenOffCount,
+		WrittenOffTotal:      writtenOffTotal,
+		FiscalSlip:           slip,
+	}, nil
+}
+
+// CloseShift — закрытие смены, снятие Z-отчёта и инкассация
+func (r *Repository) CloseShift(ctx context.Context, req CloseShiftRequest, fiscal *FiscalMockService) (*CloseShiftResponse, error) {
+	r.ensureTables(ctx)
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var s CashShift
+	err = tx.QueryRow(ctx, `
+		SELECT s.shift_id, s.cashier_id, u.full_name, s.register_number, s.opened_at, s.initial_cash
+		FROM cash_shifts s
+		JOIN users u ON u.id = s.cashier_id
+		WHERE s.status = 'OPEN'
+		FOR UPDATE OF s
+	`).Scan(&s.ShiftID, &s.CashierID, &s.CashierName, &s.RegisterNumber, &s.OpenedAt, &s.InitialCash)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("нет открытой кассовой смены для закрытия")
+		}
+		return nil, err
+	}
+
+	var (
+		cashRevenue float64
+		cardRevenue float64
+	)
+	err = tx.QueryRow(ctx, `
+		SELECT
+			COALESCE(SUM(CASE WHEN NOT r.is_refunded AND p.payment_type = 'CASH' THEN p.amount ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN NOT r.is_refunded AND p.payment_type = 'CARD' THEN p.amount ELSE 0 END), 0)
+		FROM receipts r
+		JOIN payments p ON p.receipt_id = r.receipt_id
+		WHERE r.shift_id = $1
+	`, s.ShiftID).Scan(&cashRevenue, &cardRevenue)
+	if err != nil {
+		return nil, err
+	}
+
+	totalRevenue := cashRevenue + cardRevenue
+	expectedCash := s.InitialCash + cashRevenue
+	discrepancy := req.ActualCash - expectedCash
+
+	// Печатаем фискальный Z-отчёт с гашением
+	zReportDoc, err := fiscal.PrintZReport(s.ShiftID, totalRevenue)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	_, err = tx.Exec(ctx, `
+		UPDATE cash_shifts
+		SET status = 'CLOSED',
+		    closed_at = $1,
+		    final_cash = $2,
+		    cash_revenue = $3,
+		    card_revenue = $4,
+		    encashment_amount = $5,
+		    z_report_doc = $6
+		WHERE shift_id = $7
+	`, now, req.ActualCash, cashRevenue, cardRevenue, req.EncashmentAmount, zReportDoc, s.ShiftID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	s.ClosedAt = &now
+	s.FinalCash = &req.ActualCash
+	s.CashRevenue = cashRevenue
+	s.CardRevenue = cardRevenue
+	s.EncashmentAmount = req.EncashmentAmount
+	s.ZReportDoc = &zReportDoc
+	s.Status = "CLOSED"
+
+	msg := "Кассовая смена успешно закрыта. Z-отчёт распечатан."
+	if discrepancy > 0 {
+		msg += fmt.Sprintf(" Зафиксирован излишек в кассе: +%.2f ₽.", discrepancy)
+	} else if discrepancy < 0 {
+		msg += fmt.Sprintf(" ВНИМАНИЕ: Зафиксирована недостача в кассе: %.2f ₽.", discrepancy)
+	} else {
+		msg += " Расхождений в кассе нет (идеальный баланс)."
+	}
+
+	return &CloseShiftResponse{
+		Shift:       &s,
+		ZReportSlip: zReportDoc,
+		Discrepancy: discrepancy,
+		Message:     msg,
+	}, nil
+}
+
+// ListShifts — получение истории всех кассовых смен
+func (r *Repository) ListShifts(ctx context.Context) ([]CashShift, error) {
+	r.ensureTables(ctx)
+
+	rows, err := r.db.Query(ctx, `
+		SELECT s.shift_id, s.cashier_id, u.full_name, s.register_number,
+		       s.opened_at, s.closed_at, s.initial_cash, s.final_cash,
+		       s.cash_revenue, s.card_revenue, s.encashment_amount, s.z_report_doc, s.status
+		FROM cash_shifts s
+		JOIN users u ON u.id = s.cashier_id
+		ORDER BY s.shift_id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var shifts []CashShift
+	for rows.Next() {
+		var s CashShift
+		if err := rows.Scan(
+			&s.ShiftID, &s.CashierID, &s.CashierName, &s.RegisterNumber,
+			&s.OpenedAt, &s.ClosedAt, &s.InitialCash, &s.FinalCash,
+			&s.CashRevenue, &s.CardRevenue, &s.EncashmentAmount, &s.ZReportDoc, &s.Status,
+		); err != nil {
+			return nil, err
+		}
+		shifts = append(shifts, s)
+	}
+	return shifts, nil
+}
+
+// GetShiftReport — UC 3: Формировать сменный отчет
+func (r *Repository) GetShiftReport(ctx context.Context) (*ShiftReportDTO, error) {
+	r.ensureTables(ctx)
+
+	active, err := r.GetActiveShift(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if active != nil {
+		report := &ShiftReportDTO{
+			ShiftID:  active.ShiftID,
+			OpenedAt: active.OpenedAt,
+		}
+
+		err = r.db.QueryRow(ctx, `
+			SELECT
+				COALESCE(SUM(CASE WHEN NOT r.is_refunded THEN p.amount ELSE 0 END), 0) AS total_revenue,
+				COALESCE(SUM(CASE WHEN NOT r.is_refunded AND p.payment_type = 'CASH' THEN p.amount ELSE 0 END), 0) AS cash_subtotal,
+				COALESCE(SUM(CASE WHEN NOT r.is_refunded AND p.payment_type = 'CARD' THEN p.amount ELSE 0 END), 0) AS card_subtotal,
+				COUNT(CASE WHEN NOT r.is_refunded THEN 1 END) AS active_receipts,
+				COUNT(CASE WHEN r.is_refunded THEN 1 END) AS refunded_receipts
+			FROM receipts r
+			JOIN payments p ON p.receipt_id = r.receipt_id
+			WHERE r.shift_id = $1
+		`, active.ShiftID).Scan(
+			&report.TotalRevenue,
+			&report.CashSubtotal,
+			&report.CardSubtotal,
+			&report.ReceiptCount,
+			&report.RefundedCount,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		var (
+			writtenOffCount int
+			writtenOffTotal float64
+		)
+		_ = r.db.QueryRow(ctx, `
+			SELECT 
+				COALESCE(SUM(w.quantity), 0),
+				COALESCE(SUM(w.quantity * p.retail_price), 0)
+			FROM product_write_offs w
+			JOIN products p ON p.product_id = w.product_id
+			WHERE w.write_off_date >= $1
+		`, active.OpenedAt).Scan(&writtenOffCount, &writtenOffTotal)
+
+		report.WrittenOffCount = writtenOffCount
+		report.WrittenOffTotal = writtenOffTotal
+		return report, nil
+	}
+
+	// Если активной смены нет, ищем последнюю закрытую смену
+	var lastShift CashShift
+	err = r.db.QueryRow(ctx, `
+		SELECT shift_id, opened_at, initial_cash, cash_revenue, card_revenue
+		FROM cash_shifts
+		ORDER BY shift_id DESC
+		LIMIT 1
+	`).Scan(&lastShift.ShiftID, &lastShift.OpenedAt, &lastShift.InitialCash, &lastShift.CashRevenue, &lastShift.CardRevenue)
+
+	if err == nil {
+		report := &ShiftReportDTO{
+			ShiftID:      lastShift.ShiftID,
+			OpenedAt:     lastShift.OpenedAt,
+			TotalRevenue: lastShift.CashRevenue + lastShift.CardRevenue,
+			CashSubtotal: lastShift.CashRevenue,
+			CardSubtotal: lastShift.CardRevenue,
+		}
+		_ = r.db.QueryRow(ctx, `
+			SELECT COUNT(CASE WHEN NOT r.is_refunded THEN 1 END), COUNT(CASE WHEN r.is_refunded THEN 1 END)
+			FROM receipts r WHERE r.shift_id = $1
+		`, lastShift.ShiftID).Scan(&report.ReceiptCount, &report.RefundedCount)
+
+		return report, nil
+	}
+
+	// Резервный fallback для пустой таблицы
+	report := &ShiftReportDTO{
+		ShiftID:  0,
+		OpenedAt: time.Now().Truncate(24 * time.Hour),
+	}
+	_ = r.db.QueryRow(ctx, `
+		SELECT
+			COALESCE(SUM(CASE WHEN NOT r.is_refunded THEN p.amount ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN NOT r.is_refunded AND p.payment_type = 'CASH' THEN p.amount ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN NOT r.is_refunded AND p.payment_type = 'CARD' THEN p.amount ELSE 0 END), 0),
+			COUNT(CASE WHEN NOT r.is_refunded THEN 1 END),
+			COUNT(CASE WHEN r.is_refunded THEN 1 END)
+		FROM receipts r
+		JOIN payments p ON p.receipt_id = r.receipt_id
+	`).Scan(&report.TotalRevenue, &report.CashSubtotal, &report.CardSubtotal, &report.ReceiptCount, &report.RefundedCount)
 
 	return report, nil
 }

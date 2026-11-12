@@ -35,3 +35,23 @@ func (f *FiscalMockService) PrintRefundSlip(originalFiscalDoc string) (string, e
 func (f *FiscalMockService) AuthorizeCardPayment(amount float64) string {
 	return fmt.Sprintf("AUTH-%06d", rand.Intn(900000)+100000)
 }
+
+// PrintXReport — печать промежуточного фискального отчёта без гашения (X-отчёт)
+func (f *FiscalMockService) PrintXReport(shiftID int, totalRevenue float64) (string, error) {
+	time.Sleep(50 * time.Millisecond)
+	return fmt.Sprintf("X-ОТЧЕТ-%s-СМЕНА#%d-ВЫРУЧКА-%.2f",
+		time.Now().Format("20060102-150405"),
+		shiftID,
+		totalRevenue,
+	), nil
+}
+
+// PrintZReport — печать итогового фискального отчёта с гашением (Z-отчёт закрытия смены)
+func (f *FiscalMockService) PrintZReport(shiftID int, totalRevenue float64) (string, error) {
+	time.Sleep(80 * time.Millisecond)
+	return fmt.Sprintf("Z-ОТЧЕТ-%s-СМЕНА#%d-ИТОГ-%.2f",
+		time.Now().Format("20060102-150405"),
+		shiftID,
+		totalRevenue,
+	), nil
+}

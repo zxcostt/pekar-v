@@ -26,6 +26,13 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 	// Сменный отчет (UC 3)
 	r.Get("/api/sales/shift-report", h.ShiftReport)
+
+	// Кассовые смены: жизненный цикл, X-отчет, Z-отчет и инкассация
+	r.Get("/api/sales/shifts/current", h.GetCurrentShift)
+	r.Post("/api/sales/shifts/open", h.OpenShift)
+	r.Get("/api/sales/shifts/current/x-report", h.GetXReport)
+	r.Post("/api/sales/shifts/close", h.CloseShift)
+	r.Get("/api/sales/shifts", h.ListShifts)
 }
 
 func (h *Handler) ListReceipts(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +92,67 @@ func (h *Handler) ShiftReport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, report, http.StatusOK)
 }
 
+func (h *Handler) GetCurrentShift(w http.ResponseWriter, r *http.Request) {
+	shift, err := h.service.GetActiveShift(r.Context())
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"hasActiveShift": shift != nil,
+		"shift":          shift,
+	}, http.StatusOK)
+}
+
+func (h *Handler) OpenShift(w http.ResponseWriter, r *http.Request) {
+	var req OpenShiftRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Некорректный JSON", http.StatusBadRequest)
+		return
+	}
+	shift, err := h.service.OpenShift(r.Context(), req)
+	if err != nil {
+		handleSalesError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"message": "Кассовая смена успешно открыта, размен внесён",
+		"shift":   shift,
+	}, http.StatusCreated)
+}
+
+func (h *Handler) GetXReport(w http.ResponseWriter, r *http.Request) {
+	report, err := h.service.GetXReport(r.Context())
+	if err != nil {
+		handleSalesError(w, err)
+		return
+	}
+	writeJSON(w, report, http.StatusOK)
+}
+
+func (h *Handler) CloseShift(w http.ResponseWriter, r *http.Request) {
+	var req CloseShiftRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Некорректный JSON", http.StatusBadRequest)
+		return
+	}
+	res, err := h.service.CloseShift(r.Context(), req)
+	if err != nil {
+		handleSalesError(w, err)
+		return
+	}
+	writeJSON(w, res, http.StatusOK)
+}
+
+func (h *Handler) ListShifts(w http.ResponseWriter, r *http.Request) {
+	shifts, err := h.service.GetShiftsHistory(r.Context())
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, shifts, http.StatusOK)
+}
+
 func handleSalesError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrEmptyCart),
@@ -92,8 +160,12 @@ func handleSalesError(w http.ResponseWriter, err error) {
 		errors.Is(err, ErrInsufficientCash),
 		errors.Is(err, ErrInvalidPayType),
 		errors.Is(err, ErrProductOutOfStock),
-		errors.Is(err, ErrAlreadyRefunded):
+		errors.Is(err, ErrAlreadyRefunded),
+		errors.Is(err, ErrNoActiveShift),
+		errors.Is(err, ErrInvalidCashValue):
 		writeJSONError(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, ErrShiftAlreadyOpen):
+		writeJSONError(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, ErrReceiptNotFound):
 		writeJSONError(w, err.Error(), http.StatusNotFound)
 	default:

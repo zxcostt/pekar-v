@@ -40,13 +40,15 @@ const productionOrders = ref([])
 const productWriteOffs = ref([])
 const receipts = ref([])
 const users = ref([])
+const currentShift = ref(null)
+const shiftsHistory = ref([])
 const shiftReport = ref(null)
 const lastPrintedReceipt = ref(null)
 
 // Загрузка всех справочников и документов
 async function loadAllData() {
   try {
-    const [prodData, ingData, recData, ordData, rcptData, repData, usersData, writeOffsData] = await Promise.all([
+    const [prodData, ingData, recData, ordData, rcptData, repData, usersData, writeOffsData, shiftData, shiftsData] = await Promise.all([
       api.getProducts(),
       api.getIngredients(),
       api.getRecipes(),
@@ -54,7 +56,9 @@ async function loadAllData() {
       api.getReceipts(),
       api.getShiftReport(),
       api.getUsers(),
-      api.getProductWriteOffs()
+      api.getProductWriteOffs(),
+      api.getCurrentShift(),
+      api.getShifts()
     ])
     products.value = prodData || []
     ingredients.value = ingData || []
@@ -64,6 +68,8 @@ async function loadAllData() {
     shiftReport.value = repData
     users.value = usersData || []
     productWriteOffs.value = writeOffsData || []
+    currentShift.value = shiftData?.shift || null
+    shiftsHistory.value = shiftsData || []
   } catch (err) {
     notify(err.message, 'error')
   }
@@ -128,9 +134,11 @@ function handleCheckoutSuccess(res) {
           v-if="activeTab === 'pos'"
           :products="products"
           :current-user="currentUser"
+          :current-shift="currentShift"
           :last-printed-receipt="lastPrintedReceipt"
           @checkout-success="handleCheckoutSuccess"
           @writeoff-success="loadAllData"
+          @shift-updated="loadAllData"
           @notify="notify"
         />
 
@@ -177,6 +185,10 @@ function handleCheckoutSuccess(res) {
         <ReportsTab
           v-if="activeTab === 'reports'"
           :shift-report="shiftReport"
+          :current-shift="currentShift"
+          :shifts-history="shiftsHistory"
+          @shift-updated="loadAllData"
+          @notify="notify"
         />
 
         <!-- МОДУЛЬ 7: УПРАВЛЕНИЕ ПЕРСОНАЛОМ (ТОЛЬКО ДЛЯ УПРАВЛЯЮЩЕГО) -->
