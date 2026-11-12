@@ -63,9 +63,25 @@ CREATE TABLE product_write_offs (
     write_off_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 3. Пакет SalesAndPOS: Чеки и Платежи
+-- 3. Пакет SalesAndPOS: Кассовые смены, Чеки и Платежи
+CREATE TABLE cash_shifts (
+    shift_id SERIAL PRIMARY KEY,
+    cashier_id INT NOT NULL REFERENCES users(id),
+    register_number INT NOT NULL DEFAULT 1,
+    opened_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    closed_at TIMESTAMP,
+    initial_cash NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (initial_cash >= 0),
+    final_cash NUMERIC(10, 2),
+    cash_revenue NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    card_revenue NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    encashment_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    z_report_doc VARCHAR(100),
+    status VARCHAR(20) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'CLOSED'))
+);
+
 CREATE TABLE receipts (
     receipt_id SERIAL PRIMARY KEY,
+    shift_id INT REFERENCES cash_shifts(shift_id) ON DELETE SET NULL,
     cashier_id INT NOT NULL REFERENCES users(id),
     receipt_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     discount_rate NUMERIC(5, 2) NOT NULL DEFAULT 0 CHECK (discount_rate >= 0 AND discount_rate <= 100),

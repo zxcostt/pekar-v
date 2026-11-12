@@ -46,4 +46,19 @@ export const api = {
   refund: (fiscalDocNumber, reason) =>
     request('/sales/refund', { method: 'POST', body: JSON.stringify({ fiscalDocNumber, reason }) }),
   getShiftReport: () => request('/sales/shift-report'),
+
+  // Кассовые смены (X-отчёт, Z-отчёт, инкассация)
+  getCurrentShift: () => request('/sales/shifts/current'),
+  openShift: (cashierId, initialCash, registerNumber = 1) =>
+    request('/sales/shifts/open', {
+      method: 'POST',
+      body: JSON.stringify({ cashierId, initialCash, registerNumber })
+    }),
+  getXReport: () => request('/sales/shifts/current/x-report'),
+  closeShift: (cashierId, actualCash, encashmentAmount) =>
+    request('/sales/shifts/close', {
+      method: 'POST',
+      body: JSON.stringify({ cashierId, actualCash, encashmentAmount })
+    }),
+  getShifts: () => request('/sales/shifts'),
 }

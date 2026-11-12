@@ -24,6 +24,7 @@ func (ri *ReceiptItem) CalculateLineTotal() float64 {
 // Receipt — фискальный чек продажи
 type Receipt struct {
 	ReceiptID       int            `json:"receiptId"`
+	ShiftID         *int           `json:"shiftId,omitempty"`
 	CashierID       int            `json:"cashierId"`
 	CashierName     string         `json:"cashierName,omitempty"`
 	ReceiptDate     time.Time      `json:"receiptDate"`
@@ -169,4 +170,63 @@ type CreateSaleRequest struct {
 type RefundRequest struct {
 	FiscalDocNumber string `json:"fiscalDocNumber"`
 	Reason          string `json:"reason"`
+}
+
+// CashShift — кассовая смена (жизненный цикл смены кассира)
+type CashShift struct {
+	ShiftID          int        `json:"shiftId"`
+	CashierID        int        `json:"cashierId"`
+	CashierName      string     `json:"cashierName,omitempty"`
+	RegisterNumber   int        `json:"registerNumber"`
+	OpenedAt         time.Time  `json:"openedAt"`
+	ClosedAt         *time.Time `json:"closedAt,omitempty"`
+	InitialCash      float64    `json:"initialCash"`                 // Начальный размен
+	FinalCash        *float64   `json:"finalCash,omitempty"`        // Фактический остаток наличных в кассе
+	CashRevenue      float64    `json:"cashRevenue"`                 // Выручка наличными
+	CardRevenue      float64    `json:"cardRevenue"`                 // Выручка безналичная
+	EncashmentAmount float64    `json:"encashmentAmount"`            // Изъято / сдано в сейф
+	ZReportDoc       *string    `json:"zReportDoc,omitempty"`        // Номер Z-отчёта
+	Status           string     `json:"status"`                      // OPEN | CLOSED
+}
+
+// XReportDTO — промежуточный фискальный отчёт за смену без гашения
+type XReportDTO struct {
+	ShiftID              int       `json:"shiftId"`
+	RegisterNumber       int       `json:"registerNumber"`
+	CashierID            int       `json:"cashierId"`
+	CashierName          string    `json:"cashierName"`
+	OpenedAt             time.Time `json:"openedAt"`
+	ReportTime           time.Time `json:"reportTime"`
+	InitialCash          float64   `json:"initialCash"`
+	CashRevenue          float64   `json:"cashRevenue"`
+	CardRevenue          float64   `json:"cardRevenue"`
+	TotalRevenue         float64   `json:"totalRevenue"`
+	ReceiptCount         int       `json:"receiptCount"`
+	RefundedCount        int       `json:"refundedCount"`
+	ExpectedCashInDrawer float64   `json:"expectedCashInDrawer"`
+	WrittenOffCount      int       `json:"writtenOffCount"`
+	WrittenOffTotal      float64   `json:"writtenOffTotal"`
+	FiscalSlip           string    `json:"fiscalSlip"`
+}
+
+// OpenShiftRequest — DTO запроса на открытие кассовой смены
+type OpenShiftRequest struct {
+	CashierID      int     `json:"cashierId"`
+	RegisterNumber int     `json:"registerNumber,omitempty"`
+	InitialCash    float64 `json:"initialCash"` // Разменная монета
+}
+
+// CloseShiftRequest — DTO запроса на закрытие смены и снятие Z-отчета
+type CloseShiftRequest struct {
+	CashierID        int     `json:"cashierId"`
+	ActualCash       float64 `json:"actualCash"`       // Фактически пересчитано в кассе
+	EncashmentAmount float64 `json:"encashmentAmount"` // Сколько сдается управляющему
+}
+
+// CloseShiftResponse — результат закрытия смены
+type CloseShiftResponse struct {
+	Shift       *CashShift `json:"shift"`
+	ZReportSlip string     `json:"zReportSlip"`
+	Discrepancy float64    `json:"discrepancy"` // Расхождение (излишек / недостача)
+	Message     string     `json:"message"`
 }
