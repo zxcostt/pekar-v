@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -19,6 +20,8 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/auth/login", h.Login)
 	r.Get("/api/users", h.ListUsers)
+	r.Post("/api/users", h.CreateUser)
+	r.Delete("/api/users/{id}", h.DismissUser)
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +57,61 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(users)
+}
+
+func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
+	var req CreateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Некорректный формат JSON", http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.service.CreateUser(r.Context(), req)
+	if err != nil {
+		if errors.Is(err, ErrUserAlreadyExists) {
+			writeJSONError(w, err.Error(), http.StatusConflict)
+			return
+		}
+		if errors.Is(err, ErrInvalidUserData) {
+			writeJSONError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSONError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(user)
+}
+
+func (h *Handler) DismissUser(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	targetID, err := strconv.Atoi(idStr)
+	if err != nil {
+		writeJSONError(w, "Некорректный ID сотрудника", http.StatusBadRequest)
+		return
+	}
+
+	managerID := 0
+	if mStr := r.URL.Query().Get("managerId"); mStr != "" {
+		managerID, _ = strconv.Atoi(mStr)
+	}
+
+	msg, err := h.service.DismissUser(r.Context(), targetID, managerID)
+	if err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			writeJSONError(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		writeJSONError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": msg,
+	})
 }
 
 func writeJSONError(w http.ResponseWriter, message string, code int) {

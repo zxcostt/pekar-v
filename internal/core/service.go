@@ -3,11 +3,15 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 )
 
 var (
 	ErrInvalidCredentials = errors.New("Неверный логин или пароль. Повторите попытку")
 	ErrAccountBlocked     = errors.New("Учетная запись заблокирована. Обратитесь к управляющему пекарни")
+	ErrUserAlreadyExists  = errors.New("Сотрудник с таким логином уже существует в системе")
+	ErrInvalidUserData    = errors.New("Логин, пароль и корректная роль обязательны для заполнения")
 )
 
 type Service struct {
@@ -47,4 +51,80 @@ func (s *Service) Authenticate(ctx context.Context, req LoginRequest) (*LoginRes
 
 func (s *Service) GetAllUsers(ctx context.Context) ([]User, error) {
 	return s.repo.ListAll(ctx)
+}
+
+func (s *Service) CreateUser(ctx context.Context, req CreateUserRequest) (*User, error) {
+	login := strings.TrimSpace(req.Login)
+	password := strings.TrimSpace(req.Password)
+	role := strings.ToUpper(strings.TrimSpace(req.Role))
+
+	if login == "" || password == "" || role == "" {
+		return nil, ErrInvalidUserData
+	}
+
+	switch role {
+	case "CASHIER", "BAKER", "STOREKEEPER", "MANAGER":
+	default:
+		return nil, errors.New("Недопустимая роль. Доступные роли: CASHIER, BAKER, STOREKEEPER, MANAGER")
+	}
+
+	// Проверяем уникальность логина
+	existing, err := s.repo.GetByLogin(ctx, login)
+	if err == nil && existing != nil {
+		return nil, ErrUserAlreadyExists
+	}
+
+	fullName := strings.TrimSpace(req.FullName)
+	if fullName == "" {
+		fullName = login
+	}
+
+	newUser := &User{
+		FullName:        fullName,
+		Login:           login,
+		PasswordHash:    password,
+		Role:            role,
+		IsActive:        true,
+		RegisterNumber:  req.RegisterNumber,
+		WorkshopStation: req.WorkshopStation,
+		WarehouseZoneID: req.WarehouseZoneID,
+	}
+
+	// Дефолтные значения для Single Table Inheritance полей
+	if role == "CASHIER" && newUser.RegisterNumber == nil {
+		reg := 1
+		newUser.RegisterNumber = &reg
+	} else if role == "BAKER" && (newUser.WorkshopStation == nil || *newUser.WorkshopStation == "") {
+		st := "Печной цех №1"
+		newUser.WorkshopStation = &st
+	} else if role == "STOREKEEPER" && newUser.WarehouseZoneID == nil {
+		zone := 101
+		newUser.WarehouseZoneID = &zone
+	}
+
+	return s.repo.CreateUser(ctx, newUser)
+}
+
+func (s *Service) DismissUser(ctx context.Context, targetUserID, managerID int) (string, error) {
+	if managerID > 0 && targetUserID == managerID {
+		return "", errors.New("Нельзя уволить самого себя")
+	}
+
+	user, err := s.repo.GetByID(ctx, targetUserID)
+	if err != nil {
+		return "", err
+	}
+
+	// 1. Пытаемся полностью удалить, если у сотрудника нет связанных записей в БД
+	err = s.repo.HardDeleteUser(ctx, targetUserID)
+	if err == nil {
+		return fmt.Sprintf("Аккаунт сотрудника «%s» успешно удалён из системы", user.FullName), nil
+	}
+
+	// 2. Если есть связанные документы (чеки, наряды), деактивируем аккаунт
+	if err := s.repo.DeactivateUser(ctx, targetUserID); err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("Сотрудник «%s» уволен (аккаунт заблокирован, история операций сохранена)", user.FullName), nil
 }
