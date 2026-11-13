@@ -114,10 +114,10 @@ CREATE TABLE payments (
 
 -- 4. Начальные тестовые данные 
 INSERT INTO users (full_name, login, password_hash, role, register_number, workshop_station, warehouse_zone_id) VALUES
-('Иванова Анна (Кассир)', 'cashier', 'pass123', 'CASHIER', 1, NULL, NULL),
-('Петров Сергей (Пекарь)', 'baker', 'pass123', 'BAKER', NULL, 'Печной цех №1', NULL),
-('Сидоров Алексей (Кладовщик)', 'store', 'pass123', 'STOREKEEPER', NULL, NULL, 101),
-('Дяченко Владислав (Управляющий)', 'admin', 'admin123', 'MANAGER', NULL, NULL, NULL);
+('Иванова Анна (Кассир)', 'cashier', '$2a$10$Y1nVOhPar/VpKdIqcxMsQehrb2D9i.DB7hCkJ7wfaP88.Y5/ZU.MG', 'CASHIER', 1, NULL, NULL),
+('Петров Сергей (Пекарь)', 'baker', '$2a$10$Y1nVOhPar/VpKdIqcxMsQehrb2D9i.DB7hCkJ7wfaP88.Y5/ZU.MG', 'BAKER', NULL, 'Печной цех №1', NULL),
+('Сидоров Алексей (Кладовщик)', 'store', '$2a$10$Y1nVOhPar/VpKdIqcxMsQehrb2D9i.DB7hCkJ7wfaP88.Y5/ZU.MG', 'STOREKEEPER', NULL, NULL, 101),
+('Дяченко Владислав (Управляющий)', 'admin', '$2a$10$MCLrSWLSPkdrh2ZBdqKobuvxZfX02p4UlB5qovS7fcgwLQgVZe2dG', 'MANAGER', NULL, NULL, NULL);
 
 INSERT INTO ingredients (name, current_stock, unit, purchase_price) VALUES
 ('Мука пшеничная в/с', 100.000, 'кг', 45.00),

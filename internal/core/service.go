@@ -36,6 +36,11 @@ func (s *Service) Authenticate(ctx context.Context, req LoginRequest) (*LoginRes
 		return nil, ErrInvalidCredentials
 	}
 
+	// Если пароль в базе был открытым текстом (legacy), прозрачно обновляем на bcrypt
+	if user.PasswordHash == req.Password && !strings.HasPrefix(user.PasswordHash, "$2") {
+		_ = s.UpgradePasswordHash(ctx, user.ID, req.Password)
+	}
+
 	// Альтернативная последовательность 2: Учетная запись заблокирована
 	if !user.IsActive {
 		return nil, ErrAccountBlocked
@@ -79,10 +84,15 @@ func (s *Service) CreateUser(ctx context.Context, req CreateUserRequest) (*User,
 		fullName = login
 	}
 
+	hashedPassword, err := HashPassword(password)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка хеширования пароля: %w", err)
+	}
+
 	newUser := &User{
 		FullName:        fullName,
 		Login:           login,
-		PasswordHash:    password,
+		PasswordHash:    hashedPassword,
 		Role:            role,
 		IsActive:        true,
 		RegisterNumber:  req.RegisterNumber,
@@ -127,4 +137,12 @@ func (s *Service) DismissUser(ctx context.Context, targetUserID, managerID int) 
 	}
 
 	return fmt.Sprintf("Сотрудник «%s» уволен (аккаунт заблокирован, история операций сохранена)", user.FullName), nil
+}
+
+func (s *Service) UpgradePasswordHash(ctx context.Context, userID int, plainPassword string) error {
+	hashed, err := HashPassword(plainPassword)
+	if err != nil {
+		return err
+	}
+	return s.repo.UpdatePasswordHash(ctx, userID, hashed)
 }

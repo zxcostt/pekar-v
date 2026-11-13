@@ -1,8 +1,27 @@
 package core
 
-import "time"
+import (
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
+)
 
 const MaxLoginAttempts = 3
+
+// HashPassword хеширует открытый пароль с использованием алгоритма bcrypt
+func HashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(bytes), nil
+}
+
+// CheckPasswordHash сравнивает открытый пароль с bcrypt-хешем
+func CheckPasswordHash(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
+}
 
 // User — базовая структура сотрудника (соответствует классу User)
 type User struct {
@@ -18,6 +37,11 @@ type User struct {
 }
 
 func (u *User) VerifyPassword(inputPassword string) bool {
+	// 1. Проверяем bcrypt-хеш
+	if CheckPasswordHash(inputPassword, u.PasswordHash) {
+		return true
+	}
+	// 2. Обратная совместимость для старых незахешированных паролей
 	return u.PasswordHash == inputPassword
 }
 

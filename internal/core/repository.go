@@ -15,7 +15,43 @@ type Repository struct {
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{db: db}
+	repo := &Repository{db: db}
+	repo.ensureHashedPasswords(context.Background())
+	return repo
+}
+
+func (r *Repository) ensureHashedPasswords(ctx context.Context) {
+	rows, err := r.db.Query(ctx, `SELECT id, password_hash FROM users WHERE password_hash NOT LIKE '$2%'`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	type toUpdate struct {
+		id   int
+		hash string
+	}
+	var updates []toUpdate
+
+	for rows.Next() {
+		var id int
+		var plain string
+		if err := rows.Scan(&id, &plain); err == nil {
+			if hashed, err := HashPassword(plain); err == nil {
+				updates = append(updates, toUpdate{id: id, hash: hashed})
+			}
+		}
+	}
+	rows.Close()
+
+	for _, u := range updates {
+		_, _ = r.db.Exec(ctx, `UPDATE users SET password_hash = $1 WHERE id = $2`, u.hash, u.id)
+	}
+}
+
+func (r *Repository) UpdatePasswordHash(ctx context.Context, userID int, newHash string) error {
+	_, err := r.db.Exec(ctx, `UPDATE users SET password_hash = $1 WHERE id = $2`, newHash, userID)
+	return err
 }
 
 func (r *Repository) GetByLogin(ctx context.Context, login string) (*User, error) {
